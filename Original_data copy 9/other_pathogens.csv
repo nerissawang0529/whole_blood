@@ -1,0 +1,26 @@
+"EB_id","outcome_pat_cause1","outcome_def_pathogen1","Gram_negative","Gram_positive","Virus","Fungi"
+"1009","Coronavirus","0",0,"0",1,0
+"1010","Parainfluenza virus 1-4","0",0,"0",1,0
+"1011","Coronavirus","0",0,"0",1,0
+"1022","Coronavirus","Corona virus",0,"0",1,0
+"1024","Pseudomonas aeruginosa","0",1,"0",0,0
+"1028","Respiratory syncytial virus (RSV)","0",0,"0",1,0
+"1046","Rhinovirus","0",0,"0",1,0
+"1051","Coronavirus","0",0,"0",1,0
+"1059","Pseudomonas aeruginosa","0",1,"0",0,0
+"1071","Rhinovirus","0",0,"0",1,0
+"1072","Other","Stenotrophomonas maltophilia",1,"0",0,0
+"1089","Escherichia coli","0",1,"0",0,0
+"1101","Aspergillus spp","0",0,"0",0,1
+"1104","Rhinovirus","0",0,"0",1,0
+"1106","Rhinovirus","0",0,"0",1,0
+"1115","Pseudomonas aeruginosa","0",1,"0",0,0
+"1237","Respiratory syncytial virus (RSV)","0",0,"0",1,0
+"1238","Aspergillus spp","0",0,"0",0,1
+"1240","Other","Pseudomonas fluorescens",1,"0",0,0
+"3014","Pneumocystis carinii","0",0,"0",0,1
+"3016","Influenza B virus","0",0,"0",1,0
+"3039","Other","Moraxella catarrhalis",1,"0",0,0
+"3044","Pseudomonas aeruginosa","0",1,"0",0,0
+"3048","Rhinovirus","0",0,"0",1,0
+"3322","Respiratory syncytial virus (RSV)","0",0,"0",1,0

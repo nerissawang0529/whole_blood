@@ -1,0 +1,25 @@
+"EB_id","outcome_pat_cause1","outcome_pat_cause2","outcome_def_pathogen2","outcome_pat_cause3","outcome_def_pathogen3","Gram_negative","Gram_positive","Virus","Fungi"
+"1006","Streptococcus pneumoniae","Other","Moraxella osloensis","0",NA,1,"1",0,0
+"1008","Pneumocystis carinii","Rhinovirus","0","0",NA,0,"0",1,1
+"1015","human MetaPneumoVirus (hMPV)","Staphylococcus aureus","0","0",NA,0,"1",1,0
+"1023","Haemophilus influenzae","Rhinovirus","0","0",NA,1,"0",1,0
+"1029","Haemophilus influenzae","Respiratory syncytial virus (RSV)","0","0",NA,1,"0",1,0
+"1031","Haemophilus influenzae","Rhinovirus","0","0",NA,1,"0",1,0
+"1033","Streptococcus pneumoniae","Influenza A virus","0","0",NA,0,"1",1,0
+"1036","Streptococcus pneumoniae","Haemophilus influenzae","0","Rhinovirus",NA,1,"1",1,0
+"1048","Streptococcus pneumoniae","Coronavirus","0","0",NA,0,"1",1,0
+"1049","Influenza B virus","Aspergillus spp","0","0",NA,0,"0",1,1
+"1066","Mycobacterium tuberculosis","Rhinovirus","0","0",NA,0,"0",1,0
+"1073","Influenza B virus","Rhinovirus","0","0",NA,0,"0",1,0
+"1074","Streptococcus pneumoniae","human MetaPneumoVirus (hMPV)","0","0",NA,0,"1",1,0
+"1076","Haemophilus influenzae","Influenza B virus","0","0",NA,1,"0",1,0
+"1098","Pseudomonas aeruginosa","Coronavirus","0","0",NA,1,"0",1,0
+"1100","Streptococcus pneumoniae","Respiratory syncytial virus (RSV)","0","0",NA,0,"1",1,0
+"1105","Streptococcus pneumoniae","Haemophilus influenzae","0","0",NA,1,"1",0,0
+"1107","Pseudomonas aeruginosa","Staphylococcus aureus","0","0",NA,1,"1",0,0
+"1221","Haemophilus influenzae","Other","Serratia marcescens","0",NA,1,"0",0,0
+"1248","Parainfluenza virus 1-4","Rhinovirus","0","0",NA,0,"0",1,0
+"3010","Streptococcus pneumoniae","Staphylococcus aureus","0","0",NA,0,"1",0,0
+"3330","Streptococcus intermedius","Lactobacillus casei","0","0",NA,0,"1",0,0
+"3351","Streptococcus pneumoniae","Influenza A virus","0","0",NA,0,"1",1,0
+"7005","Streptococcus pneumoniae","Influenza A virus","0","0",NA,0,"1",1,0

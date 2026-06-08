@@ -1,0 +1,767 @@
+# the logical of the code:
+# first make all EB studydata, then RNA-seq, then merge to find sub-studydata, then TCS, then merge together
+
+rm(list = ls ())
+
+## install.packages("pacman")
+pacman::p_load(pacman, tidyverse, readr, dplyr, tidyr, rio, ggplot2, naniar,
+               nlme, lcmm, tableone, lattice, reshape2, data.table, scales, plyr, Hmisc,
+               tableone, kmed, survival, survminer, skimr, lattice, reshape2, grDevices, ggrepel)
+
+
+# Ready data for studydata ####
+studydata <- import("Original_data/ELDER-BIOME_excel_export_20230418012733.xlsx")
+## p_load(tableone)
+
+colnames(studydata)[colnames(studydata) == "Participant Id"] <- "Record Id"
+
+
+## Fix missing
+studydata[studydata == "##USER_MISSING_99##"] <- NA
+studydata[studydata == "##USER_MISSING_97##"] <- NA
+studydata[studydata == "##USER_MISSING_96##"] <- NA
+studydata[studydata == "##USER_MISSING_95##"] <- NA
+studydata[studydata == "##USER_MISSING_98##"] <- NA
+studydata[studydata == ""] <- NA
+studydata[studydata == "Unknown"] <- NA
+studydata[studydata == -99] <- NA
+studydata[studydata == -97] <- NA
+studydata[studydata == -96] <- NA
+studydata$outcome_pat_icu[studydata$outcome_pat_icu == ""] <- NA
+studydata$outcome_pat_invas_vent[studydata$outcome_pat_invas_vent == ""] <- NA
+studydata$outcome_pat_invas_vent[studydata$outcome_pat_invas_vent == "98"] <- NA
+studydata$outcome_pat_icu[studydata$outcome_pat_icu == "98"] <- NA
+
+
+## admission date as date
+studydata$base_date_admission <- as.Date(studydata$base_date_admission, format = "%d-%m-%Y")
+## studydata$`Record Id` <- as.numeric(studydata$`Record Id`)
+
+## studydata
+##
+## find people who are samples on the ICU ## 32 patients
+studydata$outcome_pat_icu_admission <- as.Date(studydata$outcome_pat_icu_admission, "%d-%m-%Y")
+class(studydata$outcome_pat_icu_admission)
+
+studydata$base_date_assessment <- as.Date(studydata$base_date_assessment, "%d-%m-%Y")
+class(studydata$base_date_assessment)
+
+studydata$time_sampling_ICU_admission <- difftime(studydata$outcome_pat_icu_admission, studydata$base_date_assessment, units = "days")
+class(studydata$time_sampling_ICU_admission)
+
+studydata$time_ICU_admission <- difftime(studydata$outcome_pat_icu_admission, studydata$base_date_admission, units = "days")
+studydata$time_ICU_admission <- as.numeric(studydata$time_ICU_admission)
+studydata$sampling_on_ICU_day <- ifelse(studydata$base_date_assessment > studydata$outcome_pat_icu_admission, "Yes",
+                                        ifelse(studydata$base_date_assessment == studydata$outcome_pat_icu_admission, "maybe", "No"))
+table(studydata$sampling_on_ICU_day)
+
+## manually inspect patients with ICU admission and sampling on same day
+ICU_and_sampling_same_day <- filter(studydata, studydata$sampling_on_ICU_day == "maybe")
+ICU_and_sampling_same_day <- select(ICU_and_sampling_same_day, "Record Id", "base_date_assessment", "outcome_pat_icu_admission", "time_sampling_ICU_admission")
+
+
+studydata$sampling_on_ICU_day[studydata$`Record Id` == 1127] <- "No"
+studydata$sampling_on_ICU_day[studydata$`Record Id` == 	1150] <- "No"
+studydata$sampling_on_ICU_day[studydata$`Record Id` == 	1154] <- "Yes"
+studydata$sampling_on_ICU_day[studydata$`Record Id` == 	1157] <- "Yes"
+studydata$sampling_on_ICU_day[studydata$`Record Id` == 	1169] <- "Yes"
+studydata$sampling_on_ICU_day[studydata$`Record Id` == 	1183] <- "Yes" 
+studydata$sampling_on_ICU_day[studydata$`Record Id` == 	1197] <- "Yes"
+studydata$sampling_on_ICU_day[studydata$`Record Id` == 	3081] <- "No"
+studydata$sampling_on_ICU_day[studydata$`Record Id` == 	3147] <- "No"
+studydata$sampling_on_ICU_day[studydata$`Record Id` == 	3183] <- "No"
+studydata$sampling_on_ICU_day[studydata$`Record Id` == 	3189] <- "Yes"
+studydata$sampling_on_ICU_day[studydata$`Record Id` == 	1209] <- "No"
+studydata$sampling_on_ICU_day[studydata$`Record Id` == 	3197] <- "No"
+studydata$sampling_on_ICU_day[studydata$`Record Id` == 	1227] <- "Yes"
+studydata$sampling_on_ICU_day[studydata$`Record Id` == 	1091] <- "No"
+
+## check => there should be 0 "maybe" Now
+ICU_and_sampling_same_day <- filter(studydata, studydata$sampling_on_ICU_day == "maybe")
+remove(ICU_and_sampling_same_day)
+
+## make na No
+studydata$ICU_patient <- ifelse(is.na(studydata$sampling_on_ICU_day), "No", studydata$sampling_on_ICU_day)
+table(studydata$ICU_patient)
+
+## make MEWS variable
+studydata$base_rr <- as.numeric(studydata$base_rr)
+studydata$base_oxygen <- as.numeric(studydata$base_oxygen)
+studydata$base_spo2 <- as.numeric(studydata$base_spo2)
+studydata$base_hr <- as.numeric(studydata$base_hr)
+studydata$base_syst_bp <- as.numeric(studydata$base_syst_bp)
+studydata$base_temp <- as.numeric(studydata$base_temp)
+studydata$MEWS_resp_rate <- with(studydata, ifelse(is.na(base_rr), NA,
+                                                   ifelse(base_rr < 9, 2,
+                                                          ifelse(base_rr %in% 9:14, 0,
+                                                                 ifelse(base_rr %in% 15:20, 1,
+                                                                        ifelse(base_rr %in% 21:29, 2,
+                                                                               ifelse(base_rr >= 30, 3, NA)))))))
+###heart rate for MEWS score
+studydata$MEWS_hrt_rate <- with(studydata, ifelse(is.na(base_hr), NA,
+                                                  ifelse(base_hr < 40, 2,
+                                                         ifelse(base_hr %in% 40:50, 1, 
+                                                                ifelse(base_hr %in% 51:100, 0,
+                                                                       ifelse(base_hr %in% 101:110, 1,
+                                                                              ifelse(base_hr %in% 111:129, 2,
+                                                                                     ifelse(base_hr >= 130, 3, NA))))))))
+
+###systolic blood pressure for MEWS score
+studydata$MEWS_sys_bp <- with(studydata, ifelse(is.na(base_syst_bp), NA,
+                                                ifelse(base_syst_bp <= 70, 3,
+                                                       ifelse(base_syst_bp %in% 71:80, 2, 
+                                                              ifelse(base_syst_bp %in% 81:100, 1,
+                                                                     ifelse(base_syst_bp %in% 101:199, 0,
+                                                                            ifelse(base_syst_bp >= 200, 2, NA)))))))
+
+###temperature for MEWS score
+studydata$MEWS_temp <- with(studydata, ifelse(is.na(base_temp), NA,
+                                              ifelse(base_temp < 35, 2, 
+                                                     ifelse(base_temp >= 35 & base_temp < 38.5, 0,
+                                                            ifelse(base_temp >= 38.5, 2, NA)))))
+
+###level of consciousness for MEWS score
+studydata$base_mental_status 
+studydata$MEWS_conciousness <- ifelse(!is.na(studydata$base_mental_status) & studydata$base_mental_status == "Yes", 1, 0)
+
+
+studydata$MEWS_score <- with(studydata, MEWS_resp_rate + MEWS_hrt_rate + MEWS_sys_bp +
+                               MEWS_conciousness + MEWS_temp)
+
+
+## CURB with missing of one variable is missing
+studydata$CURB_rr  <- with(studydata, ifelse(is.na(base_rr), NA,
+                                             ifelse(base_rr >= 30, 1, 0)))
+studydata$CURB_confusion  <-  with(studydata, ifelse(!is.na(base_mental_status) & base_mental_status == "Yes", 1, 0))
+studydata$CURB_bp  <- with(studydata, ifelse(is.na(base_syst_bp), NA,
+                                             ifelse(base_syst_bp <= 90, 1, 
+                                                    ifelse(base_diast <= 60, 1, 0))))
+studydata$CURB_age <- with(studydata, ifelse(dem_pat_age >= 65, 1, 0))
+studydata$CURB_ureum <- with(studydata, ifelse(lab_pat_bun == "No", 0,
+                                               ifelse(is.na(lab_pat_bun_1), 0, 
+                                                      ifelse(lab_pat_bun_1 > 7, 1, 0))))
+studydata$CURB_score<- with(studydata, CURB_rr  + CURB_confusion  + CURB_bp  + CURB_age  + CURB_ureum )
+studydata$CURB_score_no_age <-with(studydata, CURB_rr  + CURB_confusion  + CURB_bp  + CURB_ureum )
+
+studydata$base_gcs <- ifelse(studydata$base_mental_status == "Yes", studydata$base_gcs, 15)
+
+## calculate qSOFA
+studydata$qSOFA_bp <- with(studydata, ifelse(is.na(base_syst_bp), NA,
+                                             ifelse(base_syst_bp <= 100, 1, 0)))
+studydata$qSOFA_altered_mentation <- with(studydata, ifelse(studydata$base_mental_status == "Yes" | studydata$base_gcs <15, 1, 0))
+studydata$qSOFA_rr <- with(studydata, ifelse(is.na(base_rr), NA,
+                                             ifelse(base_rr >= 22, 1, 0)))
+studydata$qSOFA_score <- with(studydata,qSOFA_bp + qSOFA_altered_mentation + qSOFA_rr)
+
+## make 'white race' variable
+studydata$white_race <- ifelse(studydata$dem_pat_race == "Caucasian", 1, 0)
+
+## calculate time between admission and symptoms
+studydata$base_date_onset <- as.Date(studydata$base_date_onset, format = "%d-%m-%Y")
+studydata$days_symptoms <- difftime(studydata$base_date_admission,studydata$base_date_onset, units = "days")
+studydata$days_symptoms <- ifelse(studydata$days_symptoms <0 | studydata$days_symptoms >30, NA, studydata$days_symptoms)
+
+## calculate time between admission and sampling
+studydata$base_date_assessment
+studydata$base_date_assessment <- as.Date(studydata$base_date_assessment, "%d-%m-%Y")
+studydata$days_to_sampling <- difftime(studydata$base_date_assessment, studydata$base_date_admission, units = "days")
+
+studydata$statin <- studydata$`chrmed_pat_other.Statins_simvastatin_atorvastatin`
+studydata$PPI <- studydata$`chrmed_pat_other.Proton_pump_inhibitors_omeprazol_pantoprazol`
+studydata$base_oxygen <- ifelse(!is.na(studydata$base_oxygen) & studydata$base_oxygen >= 1, "Yes", "No")
+
+## create mortality like predict
+table(studydata$day28_pat_status)
+studydata$day28_mortality <- ifelse(studydata$day28_pat_status == "Alive, discharged to home (or previous residency or rehabilitation clinic)" 
+                                    | studydata$day28_pat_status == "Alive, transferred to other hospital" | studydata$day28_pat_status == "Alive, readmitted to the hospital after earlier discharge", 0,
+                                    ifelse(studydata$day28_pat_status == "Alive, still hospitalized on day 28 after admission", 0, 
+                                           ifelse(studydata$day28_pat_status == "Deceased", 1, NA)))
+
+studydata$wk12_mortality <- ifelse(studydata$day90_pat_status == "Alive, discharged to home (or previous residency or rehabilitation clinic)" 
+                                   | studydata$day90_pat_status == "Alive, transferred to other hospital" | studydata$day90_pat_status == "Alive, readmitted to the hospital after earlier discharge", 0,
+                                   ifelse(studydata$day90_pat_status == "Alive, still hospitalized on day 90 after admission", 0, 
+                                          ifelse(studydata$day28_mortality == 1, 1,
+                                                 ifelse(studydata$day90_pat_status == "Deceased", 1, NA))))
+
+## remove strange dates
+studydata$day28_pat_death[studydata$day28_pat_death == "01-01-2999"] <- NA
+studydata$day28_pat_death[studydata$day28_pat_death == "01-01-2996"] <- NA
+studydata$day90_pat_death[studydata$day90_pat_death == "01-01-2999"] <- NA
+studydata$day90_pat_death[studydata$day90_pat_death == "01-01-2996"] <- NA
+
+## in hospital mortality
+studydata$date_of_death <- as.Date(studydata$day28_pat_death, format = "%d-%m-%Y")
+studydata$day28_pat_discharge <- as.Date(studydata$day28_pat_discharge, format = "%d-%m-%Y")
+studydata$hospdeath <- ifelse(studydata$day28_pat_discharge <= studydata$date_of_death, 1, 0)
+studydata$hospdeath <- ifelse(is.na(studydata$hospdeath), 0, studydata$hospdeath)
+table(studydata$hospdeath)
+
+##
+studydata$diabetes <- ifelse(studydata$`comorb_pat_def_metabolic#Diabetes type 1` == 1, 1, 
+                             ifelse(studydata$`comorb_pat_def_metabolic#Diabetes type 2 (insulin dependent)` == 1, 1, 
+                                    ifelse(studydata$`comorb_pat_def_metabolic#Diabetes type 2 (only oral medication)` == 1, 1, 0)))
+
+## rename to biobank variables
+## demographics, waves is calculated
+names(studydata)[names(studydata) == "Record Id"] <- "EB_id"
+names(studydata)[names(studydata) == "base_date_admission"] <- "admission_dt1"
+names(studydata)[names(studydata) == "dem_pat_gender"] <- "gender"
+names(studydata)[names(studydata) == "white_race"] <- "ethnic_group#White"
+names(studydata)[names(studydata) == "dem_pat_age"] <- "age_yrs"
+names(studydata)[names(studydata) == "dem_pat_bmi"] <- "BMI"
+names(studydata)[names(studydata) == "base_date_onset"] <- "onset_dt"
+names(studydata)[names(studydata) == "days_symptoms"] <- "symptoms_days"
+
+## comorbidities => missing petpic, reumathologic = connective, hematologic cancer not split out
+sum(studydata$`comorb_pat_def_liver.1` == T) ## cirrhosis
+sum(studydata$`comorb_pat_def_liver.2` == T) ## hep B
+sum(studydata$`comorb_pat_def_liver.3` == T) ## hep c
+sum(studydata$`comorb_pat_def_liver.4` == T) ## Primary sclerosing cholangitis 
+studydata$live_disease <- "No"
+
+names(studydata)[names(studydata) == "comorb_pat_def_cvd.Past_myocardial_infarction"] <- "vasc_cvd.Myocardial_infarction_or_acute_coronary_syndrome"
+names(studydata)[names(studydata) == "comorb_pat_def_cvd.Congestive_heart_failure"] <- "vasc_cvd.Chronic_heart_failure"
+names(studydata)[names(studydata) == "comorb_pat_def_cvd.Peripheral_ischaemicatherosclerotic_disease"] <- "perif_vasc"
+names(studydata)[names(studydata) == "comorb_pat_def_cvd.Hypertension_medicated"] <- "hypertension"
+names(studydata)[names(studydata) == "comorb_pat_def_cvd.Past_cerebrovascular_disease_thrombosis_embolism"] <- "vasc_cvd.Ischemic_stroke_or_TIA"
+names(studydata)[names(studydata) == "comorb_pat_def_cpd.Chronic_Obstructive_Pulmonary_Disease_COPD"] <- "COPD"
+names(studydata)[names(studydata) == "comorb_pat_def_other.Rheumatologicautoimmune_disease_eg_RA_SLE_PMR"] <- "connective"
+studydata$peptic <- "No"
+studydata$liver_charl <- "none"
+studydata$hemiplegia <- "No"
+names(studydata)[names(studydata) == "comorb_pat_cpd"] <- "cpd"
+names(studydata)[names(studydata) == "comorb_pat_cvd"] <- "ccd"
+names(studydata)[names(studydata) == "comorb_pat_def_other.Chronic_renal_disease"] <- "ckd"
+names(studydata)[names(studydata) == "comorb_pat_malignancy"] <- "mneoplasm" 
+names(studydata)[names(studydata) == "comorb_pat_tumor_metastatic"] <- "metastase"
+names(studydata)[names(studydata) == "comorb_pat_neuro"] <- "cnd"
+names(studydata)[names(studydata) == "comorb_pat_immunosup"] <- "immune_sup"
+studydata$COPD <- ifelse(studydata$`comorb_pat_def_cpd#Chronic Obstructive Pulmonary Disease (COPD)` == 1, "Yes", "No")
+studydata$connective <- ifelse(studydata$`comorb_pat_def_other#Rheumatologic/autoimmune disease (e.g. RA, SLE, PMR)` == 1, "Yes", "No")
+studydata$perif_vasc <- ifelse(studydata$`comorb_pat_def_cvd#Peripheral ischaemic/atherosclerotic disease` == 1, "Yes", "No")
+
+## vital signs
+names(studydata)[names(studydata) == "base_temp"] <- "Temperature"
+names(studydata)[names(studydata) == "base_hr"] <- "HtR"
+names(studydata)[names(studydata) == "base_syst_bp"] <- "sys_bp"
+names(studydata)[names(studydata) == "base_diast"] <- "dias_bp"
+names(studydata)[names(studydata) == "base_rr"] <- "rtr"
+names(studydata)[names(studydata) == "base_spo2"] <- "oxygen_saturation"
+names(studydata)[names(studydata) == "base_gcs"] <- "EMV"
+
+## severity scores, 4C, qsofa, mews, CURB is calculated
+names(studydata)[names(studydata) == "base_pat_PSI"] <- "PSI_score"
+
+## lab
+names(studydata)[names(studydata) == "lab_pat_def_hemoglobin_1"] <- "Haemoglobin_value_1"
+
+names(studydata)[names(studydata) == "lab_pat_def_crp"] <- "crp_1_1"
+names(studydata)[names(studydata) == "lab_pat_procalcitonin_1"] <- "procalcitonine"
+names(studydata)[names(studydata) == "lab_pat_lactate_1"] <- "Lactate_2_1"
+names(studydata)[names(studydata) == "lab_pat_ldh_1"] <- "LDH"
+
+names(studydata)[names(studydata) == "lab_pat_wbc_1"] <- "WBC_2_1"
+names(studydata)[names(studydata) == "lab_pat_neutrophils_1"] <- "Neutrophil_unit_1"
+names(studydata)[names(studydata) == "lab_pat_lymphocytes_1"] <- "Lymphocyte_1_1"
+
+names(studydata)[names(studydata) == "lab_pat_creatinine_1"] <- "Creatinine_value_1"
+names(studydata)[names(studydata) == "lab_pat_bun_1"] <- "Blood_Urea_Nitrogen_value_1"
+names(studydata)[names(studydata) == "lab_pat_sodium_1"] <- "Sodium_1_1"
+names(studydata)[names(studydata) == "lab_pat_potassium_1"] <- "Potassium_1_1"
+names(studydata)[names(studydata) == "Glucose_admission_value"] <- "Glucose_unit_1_1"
+
+names(studydata)[names(studydata) == "lab_pat_asat_1"] <- "AST_SGOT_1_1"
+names(studydata)[names(studydata) == "lab_pat_alat_1"] <- "ALT_SGPT_1_1"
+names(studydata)[names(studydata) == "lab_pat_bilirubin_1"] <- "Total_Bilirubin_2_1"
+
+names(studydata)[names(studydata) == "lab_pat_def_trombos"] <- "Platelets_value_1"
+names(studydata)[names(studydata) == "lab_pat_ddimer_1"] <- "d_dimer"
+names(studydata)[names(studydata) == "lab_pat_pt_1"] <- "pt_spec"
+names(studydata)[names(studydata) == "lab_pat_aptt_1"] <- "APT_APTR_1_1"
+
+names(studydata)[names(studydata) == "lab_pat_bloodgas_pH"] <- "PH_value_1"
+names(studydata)[names(studydata) == "lab_pat_bloodgas_paO2"] <- "PaO2_1"
+names(studydata)[names(studydata) == "lab_pat_bloodgas_pCO2"] <- "PCO2_1"
+
+names(studydata)[names(studydata) == "outcome_pat_supo2"] <- "Oxygen_therapy_1"
+names(studydata)[names(studydata) == "outcome_pat_supo2_start"] <- "oxygen_start"
+names(studydata)[names(studydata) == "outcome_pat_supo2_stop"] <- "oxygen_stop"
+
+names(studydata)[names(studydata) == "day28_pat_death"] <- "death_date"
+names(studydata)[names(studydata) == "day28_pat_discharge"] <- "discharge_date_local"
+
+names(studydata)[names(studydata) == "outcome_pat_def_complication.Pulmonary_embolism"] <- "LE"
+names(studydata)[names(studydata) == "outcome_pat_def_complication.Peripheral_venous_thrombosis"] <- "DVT"
+names(studydata)[names(studydata) == "outcome_pat_def_complication.Bacteremia"] <- "bacteremia"
+names(studydata)[names(studydata) == "outcome_pat_def_complication.Acute_lung_injury__ARDS"] <- "ARDS"
+
+
+
+names(studydata)[names(studydata) == "outcome_pat_icu"] <- "ICU_Medium_Care_admission_1"
+names(studydata)[names(studydata) == "outcome_pat_icu_admission"] <- "Admission_dt_icu_1"
+names(studydata)[names(studydata) == "outcome_pat_icu_discharge"] <- "Discharge_dt_icu_1"
+names(studydata)[names(studydata) == "outcome_pat_invas_vent"] <- "Invasive_ventilation_1"
+names(studydata)[names(studydata) == "outcome_pat_noninvas_vent"] <- "Non_invasive_ventilation_1"
+names(studydata)[names(studydata) == "outcome_pat_invas_vent_start"] <- "invasive_start"
+names(studydata)[names(studydata) == "outcome_pat_invas_vent_stop"] <- "invasive_stop"
+names(studydata)[names(studydata) == "outcome_pat_def_complication.Readmission"] <- "readmissed"
+
+studydata$bacteremia <- ifelse(studydata$`outcome_pat_def_complication#Bacteremia` == 1, "Yes", "No")
+
+studydata$ckd <- ifelse(is.na(studydata$`comorb_pat_def_other#Chronic renal disease`), NA,
+                        ifelse(studydata$`comorb_pat_def_other#Chronic renal disease` == 1, "Yes", "No"))
+studydata$hypertension <- ifelse(is.na(studydata$`comorb_pat_def_cvd#Hypertension (medicated)`), NA,
+                                 ifelse(studydata$`comorb_pat_def_cvd#Hypertension (medicated)` == 1, "Yes", "No"))
+
+## PSI
+studydata$`outcome_pat_def_complication#Stroke`
+
+studydata$age_yrs <- as.numeric(studydata$age_yrs)
+studydata$PSI_age <- with(studydata, ifelse(gender == "Male", studydata$age_yrs, studydata$age_yrs-10))
+studydata$PSI_neoplas <- with(studydata, ifelse(mneoplasm == "Yes", 30, 0)) 
+studydata$PSI_liver <- with(studydata, ifelse(`comorb_pat_def_liver#Hepatitis B` == 1 | `comorb_pat_def_liver#Hepatitis C` == 1 | `comorb_pat_def_liver#Cirrhosis` == 1, 20, 0))
+studydata$PSI_CHF <- with(studydata, ifelse(`comorb_pat_def_cvd#Congestive heart failure` == 1, 10, 0))
+studydata$PSI_CVD <- with(studydata, ifelse(`outcome_pat_def_complication#Stroke` == 1, 10, 0))
+studydata$PSI_renal <- with(studydata, ifelse(ckd == "Yes", 10, 0))
+studydata$PSI_mental <- with(studydata, ifelse(is.na(base_mental_status), NA, 
+                                               ifelse(base_mental_status == 1, 20, 0)))
+studydata$PSI_rtr <- with(studydata, ifelse(is.na(rtr), NA,
+                                            ifelse(rtr >=30, 20, 0)))                        
+studydata$PSI_sys <- with(studydata, ifelse(is.na(sys_bp), NA,
+                                            ifelse(sys_bp <=90, 20, 0)))  
+studydata$PSI_temp <- with(studydata, ifelse(is.na(Temperature), NA,
+                                             ifelse(Temperature <35 | Temperature >=40, 15, 0)))  
+studydata$PSI_pulse <- with(studydata, ifelse(is.na(HtR), NA,
+                                              ifelse(HtR >=125, 10 , 0)))
+studydata$PSI_ABG <- with(studydata, ifelse(is.na(studydata$PH_value_1), NA, 
+                                            ifelse(studydata$PH_value_1 <7.35, 30, 0)))
+studydata$PSI_urea <- with(studydata, ifelse(!is.na(Blood_Urea_Nitrogen_value_1) & Blood_Urea_Nitrogen_value_1 >= 11 , 20, 0)) ## no NA if missing
+studydata$PSI_glucose <- with(studydata, ifelse(!is.na(Glucose_unit_1_1) & Glucose_unit_1_1 >= 14, 10, 0))## no NA if missing
+studydata$PSI_Na <- with(studydata, ifelse(is.na(studydata$Sodium_1_1), NA,
+                                           ifelse(studydata$Sodium_1_1 <130, 20, 0)))
+studydata$PSI_O2 <- with(studydata, ifelse(is.na(PaO2_1) & is.na(oxygen_saturation), NA,
+                                           ifelse(!is.na(PaO2_1) & PaO2_1 < 7.99934211, 10,
+                                                  ifelse(!is.na(PaO2_1) & oxygen_saturation < 90, 10, 0))))
+studydata$PSI_total <- with(studydata, PSI_age + PSI_neoplas + PSI_liver + PSI_CHF + PSI_CVD + PSI_renal + PSI_mental + PSI_rtr + PSI_sys
+                            + PSI_temp + PSI_pulse + PSI_ABG + PSI_urea + PSI_Na + PSI_glucose + PSI_O2)
+studydata$PSI_calc <- with(studydata, ifelse(PSI_total <=50, 1, 
+                                             ifelse(PSI_total %in% 51:70, 2,
+                                                    ifelse(PSI_total %in% 71:90, 3,
+                                                           ifelse(PSI_total %in% 91:130, 4,
+                                                                  ifelse(PSI_total >130, 5, NA))))))
+
+## vanaf EB3.0 niet meer ingevuld maar berekend
+studydata$PSI_new <- ifelse(studydata$admission_dt <"2020-10-04", studydata$PSI_score, studydata$PSI_calc)
+
+## antibiotica antibiotic_seven_days
+studydata$curmed_pat_antibiotic_start_1 <- as.Date(studydata$curmed_pat_antibiotic_start_1, format = "%d-%m-%Y")
+studydata$curmed_pat_antibiotic_start_2 <- as.Date(studydata$curmed_pat_antibiotic_start_2, format = "%d-%m-%Y")
+studydata$curmed_pat_antibiotic_start_3 <- as.Date(studydata$curmed_pat_antibiotic_start_3, format = "%d-%m-%Y")
+studydata$curmed_pat_antibiotic_start_4 <- as.Date(studydata$curmed_pat_antibiotic_start_4, format = "%d-%m-%Y")
+studydata$curmed_pat_antibiotic_start_5 <- as.Date(studydata$curmed_pat_antibiotic_start_5, format = "%d-%m-%Y")
+studydata$curmed_pat_antibiotic_start_6 <- as.Date(studydata$curmed_pat_antibiotic_start_6, format = "%d-%m-%Y")
+
+studydata$anti_1 <- as.numeric(difftime(studydata$curmed_pat_antibiotic_start_1, studydata$admission_dt1, units = "days"))
+studydata$anti_2 <- as.numeric(difftime(studydata$curmed_pat_antibiotic_start_2, studydata$admission_dt1, units = "days"))
+studydata$anti_3 <- as.numeric(difftime(studydata$curmed_pat_antibiotic_start_3, studydata$admission_dt1, units = "days"))
+studydata$anti_4 <- as.numeric(difftime(studydata$curmed_pat_antibiotic_start_4, studydata$admission_dt1, units = "days"))
+studydata$anti_5 <- as.numeric(difftime(studydata$curmed_pat_antibiotic_start_5, studydata$admission_dt1, units = "days"))
+studydata$anti_6 <- as.numeric(difftime(studydata$curmed_pat_antibiotic_start_6, studydata$admission_dt1, units = "days"))
+
+studydata$anti_after_1 <- ifelse(studydata$anti_1 >= 0 & studydata$anti_1 <=7, 1, 0)
+studydata$anti_after_2<- ifelse(studydata$anti_2 >= 0 & studydata$anti_2 <=7, 1, 0)
+studydata$anti_after_3 <- ifelse(studydata$anti_3 >= 0 & studydata$anti_3 <=7, 1, 0)
+studydata$anti_after_4 <- ifelse(studydata$anti_4 >= 0 & studydata$anti_4 <=7, 1, 0)
+studydata$anti_after_5 <- ifelse(studydata$anti_5 >= 0 & studydata$anti_5 <=7, 1, 0)
+studydata$anti_after_6 <- ifelse(studydata$anti_6 >= 0 & studydata$anti_6 <=7, 1, 0)
+
+antibiotic_7_days <- filter(studydata, studydata$anti_after_1 == 1 | 
+                              studydata$anti_after_2 == 1 |
+                              studydata$anti_after_3 == 1 |
+                              studydata$anti_after_4 == 1 |
+                              studydata$anti_after_5 == 1 |
+                              studydata$anti_after_6 == 1)
+studydata$antibiotic_seven_days <- ifelse(studydata$EB_id %in% antibiotic_7_days$EB_id, "Yes", "No")
+
+## other comorb => all 0
+studydata$`comorb_pat_def_immunosup#HIV`
+studydata$Dementia <- "No"
+studydata$aids_hiv <- ifelse(is.na(studydata$`comorb_pat_def_immunosup#HIV`), NA,
+                             ifelse(studydata$`comorb_pat_def_immunosup#HIV`== 1, "Yes", "No"))
+
+## predict variables we want to use
+studydata$obesity <- ifelse(studydata$BMI>30, "1", 
+                            ifelse(is.na(studydata$BMI), NA, "0"))
+
+## 
+studydata$diabetes_comp <- ifelse(studydata$`comorb_pat_organ_fail_dm1#Neuropathy` == 1 | studydata$`comorb_pat_organ_fail_dm1#Nefropathy` == 1 
+                                  | studydata$`comorb_pat_organ_fail_dm2#Neuropathy` == 1 | studydata$`comorb_pat_organ_fail_dm2#Nefropathy` == 1
+                                  | studydata$`comorb_pat_organ_fail_dm1#Retinopathy` == 1 |studydata$`comorb_pat_organ_fail_dm2#Retinopathy` == 1, 1, 0)
+
+## charlson ## ELDER-BIOME, no peptic ulcer to score, no hemiplegia, rheumatic = connective, mneoplasm has all cancers
+## no AIDS only HIV
+studydata$metastase <- ifelse(is.na(studydata$metastase), "No", studydata$metastase)
+studydata$age <- as.numeric(studydata$age_yrs)
+studydata$age_yrs <- round(studydata$age, digits = 0)
+studydata$CCI_age <- ifelse(studydata$age <50, 0, ifelse(studydata$age >= 50 & studydata$age < 60, 1,
+                                                         ifelse(studydata$age >= 60 & studydata$age < 70, 2,
+                                                                ifelse(studydata$age >= 70 & studydata$age < 80, 3,4))))
+studydata$cci_mi <- ifelse(studydata$`comorb_pat_def_cvd#Past myocardial infarction`== 1, 1, 0)
+studydata$cci_chf <- ifelse(studydata$`comorb_pat_def_cvd#Congestive heart failure` == 1, 1, 0)
+studydata$cci_pvd <- ifelse(studydata$`comorb_pat_def_cvd#Peripheral ischaemic/atherosclerotic disease` == "Yes", 1, 0)
+studydata$cci_cva <- ifelse(studydata$`outcome_pat_def_complication#Stroke` == 1, 1, 0)
+studydata$cci_dementia <- ifelse(studydata$Dementia == "Yes", 1, 0)
+studydata$cci_copd <- ifelse(studydata$`comorb_pat_def_cpd#Chronic Obstructive Pulmonary Disease (COPD)` == "Yes", 1, 0)
+studydata$cci_ctd <- ifelse(studydata$connective == "Yes", 1, 0)
+studydata$cci_pud <- ifelse(studydata$peptic == "Yes", 1, 0)
+studydata$cci_liver <- ifelse(studydata$liver_charl == "Mild", 1, ifelse(studydata$liver_charl == "none", 0,3))
+studydata$cci_dm <- ifelse(studydata$diabetes == "No" & studydata$diabetes_comp == "No", 0, ifelse(studydata$diabetes_comp == "No", 1, 2))
+studydata$cci_hemiplegia <- ifelse(studydata$hemiplegia == "Yes", 2, 0)
+studydata$cci_ckd <- ifelse(studydata$ckd == "Yes", 2, 0)
+studydata$cci_malig <- ifelse(studydata$metastase == "Yes", 6, 
+                              ifelse(studydata$mneoplasm == "Yes", 2, 0))
+## studydata$cci_aids <- ifelse(studydata$aids_hiv == "Yes", 6, 0)
+studydata$CCI <- studydata$CCI_age + studydata$cci_mi + studydata$cci_chf + studydata$cci_pvd + studydata$cci_cva + studydata$cci_dementia + studydata$cci_copd + studydata$cci_ctd + studydata$cci_pud + studydata$cci_liver + studydata$cci_dm +
+  studydata$cci_hemiplegia + studydata$cci_ckd + studydata$cci_malig 
+summary(studydata$CCI)
+
+###
+studydata$first_admission_dt <- studydata$admission_dt1
+
+## make new variables 
+studydata$date_of_death <- as.Date(studydata$date_of_death, format = "%d-%m-%Y")
+studydata$Admission_dt_icu_1 <- as.Date(studydata$Admission_dt_icu_1, format = "%d-%m-%Y")
+studydata$days_survived_since_ICU <- as.numeric(difftime(studydata$date_of_death, studydata$Admission_dt_icu_1, units = "days"))
+
+studydata$admission_dt1<- as.Date(studydata$admission_dt1, format = "%d-%m-%Y")
+studydata$days_survived <- as.numeric(difftime(studydata$date_of_death, studydata$admission_dt1, units = "days"))
+
+## 3wk mortality
+studydata$wk3_mortality <- ifelse(is.na(studydata$days_survived), 0, 
+                                  ifelse(studydata$days_survived <=21, 1, 0))
+## 6wk mortality
+studydata$wk6_mortality <- ifelse(is.na(studydata$days_survived), 0, 
+                                  ifelse(studydata$days_survived <=42, 1, 0))
+## 12wk mortality
+studydata$wk12_mortality <- ifelse(is.na(studydata$days_survived), 0, 
+                                   ifelse(studydata$days_survived <=84, 1, 0))
+
+studydata$sampling_time <- as.numeric(difftime(studydata$base_date_assessment, studydata$admission_dt1,  units = "days"))
+studydata$time_sample_icu <- difftime(studydata$Admission_dt_icu_1, studydata$base_date_assessment, units = "days")
+
+## nog nodig => afname moment biobank
+## New variables for both
+studydata$Discharge_dt_icu_1 <- as.Date(studydata$Discharge_dt_icu_1, format = "%d-%m-%Y")
+studydata$invasive_start <- as.Date(studydata$invasive_start, format = "%d-%m-%Y")
+studydata$invasive_stop <- as.Date(studydata$invasive_stop, format = "%d-%m-%Y")
+studydata$death_date<- as.Date(studydata$death_date, format = "%d-%m-%Y")
+symptom_days <- as.numeric(difftime(studydata$admission_dt1,studydata$onset_dt, units = "days"))
+studydata <- add_column(studydata, symptom_days, .after = "admission_dt1")
+
+studydata$discharge_date_local[studydata$MDN == 6271126] <- "2021-05-27"
+
+length_of_stay <- as.numeric(difftime(studydata$discharge_date_local,studydata$admission_dt1, units = "days"))
+studydata <- add_column(studydata, length_of_stay, .after = "discharge_date_local")
+
+studydata$oxygen_start <- as.Date(studydata$oxygen_start, format = "%d-%m-%Y")
+studydata$oxygen_stop <- as.Date(studydata$oxygen_stop, format = "%d-%m-%Y")
+length_of_oxygen <- as.numeric(difftime(studydata$oxygen_stop,studydata$oxygen_start, units = "days"))
+studydata <- add_column(studydata, length_of_oxygen, .after = "oxygen_stop")
+studydata$day_28_admitted <- ifelse(studydata$length_of_stay >=28, 1, 0)
+
+lenght_of_intubation <- as.numeric(difftime(studydata$invasive_stop,studydata$invasive_start,  units = "days"))
+studydata <- add_column(studydata, lenght_of_intubation, .after = "invasive_stop")
+
+## change to numeric 
+i <- c("age_yrs", "BMI",	"symptom_days", "CCI",
+       "qSOFA_score",	"MEWS_score",	"CURB_score",	"PSI_score",	
+       "Haemoglobin_value_1",	"crp_1_1",	"procalcitonine",	"Lactate_2_1",	"LDH",	
+       "WBC_2_1",	"Neutrophil_unit_1",	"Lymphocyte_1_1",	
+       "Creatinine_value_1",	"Sodium_1_1",	"Potassium_1_1",	"Glucose_unit_1_1",	
+       "AST_SGOT_1_1",	"ALT_SGPT_1_1",	"Total_Bilirubin_2_1",	
+       "Platelets_value_1",	"d_dimer","pt_spec",	"APT_APTR_1_1",	"PH_value_1",	"PaO2_1",		"PCO2_1",	
+       "Blood_Urea_Nitrogen_value_1",	"length_of_stay", "length_of_oxygen")
+
+studydata[ , i] <- apply(studydata[ , i], 2, 
+                         function(x) as.numeric(as.character(x)))
+remove(i)
+
+studydata$length_of_stay_alive <- ifelse(studydata$hospdeath == 1, NA, studydata$length_of_stay)
+studydata$icu_stay <- as.numeric(difftime(studydata$Discharge_dt_icu_1, studydata$Admission_dt_icu_1,  units = "days"))
+studydata$days_survived <- difftime(studydata$death_date, studydata$first_admission_dt, unit = "days")
+studydata$mortality_d14 <- ifelse(!is.na(studydata$days_survived) & studydata$days_survived <=14, 1, 0)
+studydata$mortality_d30 <- ifelse(!is.na(studydata$days_survived) & studydata$days_survived <=30, 1, 0)
+studydata$mortality_d90 <- ifelse(!is.na(studydata$days_survived) & studydata$days_survived <=90, 1, 0)
+
+
+studydata$inclusion_hospital <- ifelse(studydata$patient_volunteer == "Healthy volunteer", "Healthy", studydata$inclusion_hospital)
+
+table(studydata$outcome_pat_cause1)
+
+##
+studydata$pathogen_cultured <- ifelse(studydata$outcome_pat_cause1 == 0 | studydata$outcome_pat_cause1 == "No causative agent found",
+                                      0, 1)
+
+pneumonia <- filter(studydata, studydata$patient_volunteer == "Pneumonia patient")
+
+##make groups by CAP, COVID-19,hv
+#Grouped by pathegon
+studydata$covid <- ifelse(studydata$outcome_pat_cause1 == "COVID-19", 1, 
+                          ifelse(studydata$outcome_pat_cause2 == "COVID-19", 1, 
+                                 ifelse(studydata$outcome_pat_cause3 == "COVID-19", 1, 0)))
+studydata$covid <- ifelse(is.na(studydata$covid), 0, studydata$covid)
+studydata$COVID_19 <- ifelse(studydata$covid == 1, "Yes", "No")
+
+studydata <- studydata %>%
+  mutate(group = case_when(
+    EB_id >= 2000 & EB_id < 3000 ~ "HV",
+    COVID_19 == "Yes" ~ "COVID",
+    COVID_19 == "No" ~ "CAP",
+    TRUE ~ NA_character_  # To handle any cases not matching above
+  ))
+studydata$group
+
+##export form
+destination_folder <- "Original_data/" 
+export_file_name <- "studydata_all_EB.csv" 
+write.csv(studydata, file.path(destination_folder, export_file_name), row.names = FALSE)
+cat("File exported to:", file.path(destination_folder, export_file_name), "\n")
+
+
+
+
+
+# Ready for RNA-seq data ####
+## ===== 1. Read clinical data and identify CAP patients =====
+eb <- read.csv("Original_data/studydata_all_EB.csv")
+
+# Identify CAP patients (replace 'Diagnosis' with the actual column name indicating CAP)
+cap_patients <- eb[grepl("CAP", eb$group, ignore.case = TRUE), ]
+
+# Extract unique Participant IDs for CAP patients
+cap_ids <- unique(cap_patients$EB_id)
+
+length(cap_ids)
+# ✅ These are all CAP patients from the ELDER-BIOME cohort
+
+
+## ===== 2. Load sample key file and RNA-seq count matrix =====
+key <- read.csv("Original_data/SK_Amsterdam.csv")
+count_mat <- read.csv("Original_data/Combined_counts_Amsterdam.csv")
+
+# Set gene IDs as row names (remove version numbers after the dot)
+row.names(count_mat) <- sapply(strsplit(count_mat$X, "\\."), "[", 1)
+count_mat$X <- NULL
+
+
+## ===== 3. Identify CAP samples with RNA-seq data =====
+## ===== 3. Identify CAP samples with RNA-seq data =====
+# Keep samples from the Elder-BIOME cohort that have RNA-seq data
+Elder <- key[grepl("EB|ELDER", key$Sample.ID) & key$RNAseq == 1, ]
+
+library(stringr)
+Elder$ID <- str_match(Elder$Sample.ID, pattern = "\\d\\d\\d\\d_")
+Elder$ID <- str_remove(Elder$ID, "_")
+
+# Select only those Elder samples belonging to CAP patients
+Elder_cap <- Elder[Elder$ID %in% cap_ids, ]
+
+#export Elder_cap
+write.csv(Elder_cap, "Original_data/qns_ID.csv", row.names = FALSE)
+
+nrow(Elder_cap)
+# ✅ This gives all Elder-BIOME CAP samples with RNA-seq data
+
+
+## ===== 4. Extract RNA-seq expression data for CAP samples =====
+# IMPORTANT: match by the 'Sample' column (technical IDs)
+count_cap <- count_mat[, colnames(count_mat) %in% Elder_cap$Sample]
+
+dim(count_cap)
+
+
+
+##export form for RNA
+destination_folder <- "Original_data/" 
+export_file_name <- "Combined_counts_Amsterdam_my_cohort_allpatients.csv" 
+write.csv(count_cap, file.path(destination_folder, export_file_name), row.names = TRUE)
+cat("File exported to:", file.path(destination_folder, export_file_name), "\n")
+
+
+##export form for table 1
+library(stringr)
+samples <- colnames(count_cap)
+matched_key <- key[key$Sample %in% samples, c("Sample", "Sample.ID")]
+
+# 
+matched_key$patient_id <- str_extract(matched_key$Sample.ID, "\\b\\d{4}(?=_[dD]\\d\\b)")
+
+# 
+idx <- is.na(matched_key$patient_id)
+matched_key$patient_id[idx] <- str_remove(str_match(matched_key$Sample.ID[idx], "\\d{4}_"), "_")
+head(matched_key)
+
+
+##
+keep_ids <- unique(na.omit(matched_key$patient_id))
+studydata_kept <- subset(studydata, as.character(EB_id) %in% keep_ids)
+nrow(studydata_kept); length(keep_ids); length(unique(studydata$EB_id))
+write.csv(studydata_kept, "Original_data/studydata_matched_allpatients.csv", row.names = FALSE)
+
+
+
+#TCS####
+## ============================================================
+##   Calculate Time to Clinical Stability (TCS) using Halm’s criteria (≤37.2°C)
+##   Source data:
+##     1) studydata_matched_allpatients.csv
+##     2) ELDER-BIOME_excel_export_20230418012733.xlsx  (sheet: Clinical_stabilty_check)
+## ============================================================
+
+library(readxl)
+library(dplyr)
+library(stringr)
+library(lubridate)
+library(janitor)
+library(rio)
+
+# ---- 1) Read study data ----
+# The file should contain: EB_id, admission_dt1, discharge_date_local, day28_pat_status, date_of_death
+studydata <- import("Original_data/studydata_matched_allpatients.csv") %>%
+  mutate(
+    admission_dt1        = suppressWarnings(ymd(admission_dt1)),
+    discharge_date_local = suppressWarnings(ymd(discharge_date_local)),
+    date_of_death        = suppressWarnings(ymd(date_of_death))
+  )
+
+# Keep all patients (no CAP filtering)
+ids_keep <- unique(studydata$EB_id)
+
+
+# ---- 2) Read Excel sheet ----
+xlsx_path  <- "Original_data/ELDER-BIOME_excel_export_20230418012733.xlsx"
+sheet_name <- "Clinical_stabilty_check"
+all_sheets <- readxl::excel_sheets(xlsx_path)
+if (!sheet_name %in% all_sheets) {
+  stop("Sheet not found: ", sheet_name, "\nAvailable sheets:\n", paste(all_sheets, collapse = ", "))
+}
+
+df_tcs <- readxl::read_excel(xlsx_path, sheet = sheet_name, col_types = "text") %>%
+  clean_names() %>%
+  mutate(clin_stab_hosp = as.numeric(clin_stab_hosp)) %>%
+  filter(participant_id %in% ids_keep) %>%
+  mutate(record_id = as.character(participant_id) |> trimws())
+
+
+# ---- 3) Merge with studydata ----
+studydata_keyed <- studydata %>%
+  dplyr::mutate(EB_id = as.character(EB_id) |> trimws()) %>%
+  dplyr::select(EB_id, admission_dt1, discharge_date_local, day28_pat_status, date_of_death) %>%
+  dplyr::rename(record_id = EB_id)
+
+df_tcs <- left_join(df_tcs, studydata_keyed, by = "record_id") %>%
+  mutate(
+    clin_stab_date = suppressWarnings(dmy(clin_stab_date)),
+    los = as.numeric(discharge_date_local - admission_dt1),
+    los = ifelse(is.na(los), NA_real_, pmax(los, 0)),
+    day28_pat_status_num = suppressWarnings(as.numeric(day28_pat_status)),
+    day28_pat_status_num = ifelse(
+      is.na(day28_pat_status_num) &
+        str_detect(tolower(as.character(day28_pat_status)), "deceased|dead|died"),
+      5, day28_pat_status_num
+    )
+  )
+
+
+# ---- 4) Define stability flags (Halm’s criteria, temperature ≤ 37.2°C) ----
+make_stability_flags <- function(df, temp_cutoff = 37.2) {
+  df %>%
+    mutate(
+      clin_stab_temp   = suppressWarnings(as.numeric(clin_stab_temp)),
+      clin_stab_hr     = suppressWarnings(as.numeric(clin_stab_hr)),
+      clin_stab_resp   = suppressWarnings(as.numeric(clin_stab_resp)),
+      clin_stab_sbp    = suppressWarnings(as.numeric(clin_stab_sbp)),
+      clin_stab_oxygen = suppressWarnings(as.numeric(clin_stab_oxygen)),
+      clin_stab_add_oxygen_std = tolower(trimws(as.character(clin_stab_add_oxygen))),
+      
+      # Apply Halm's clinical stability criteria:
+      cs_temp = ifelse(is.na(clin_stab_temp) | clin_stab_temp <= temp_cutoff, 1L, 0L),
+      cs_hr   = ifelse(is.na(clin_stab_hr)   | clin_stab_hr   <= 100, 1L, 0L),
+      cs_rr   = ifelse(is.na(clin_stab_resp) | clin_stab_resp <= 24, 1L, 0L),
+      cs_bp   = ifelse(is.na(clin_stab_sbp)  | clin_stab_sbp  >= 90, 1L, 0L),
+      cs_ox   = ifelse(clin_stab_add_oxygen_std == "no" & clin_stab_oxygen >= 90, 1L, 0L),
+      
+      # Stable if all five criteria are met
+      stable  = ifelse(cs_temp==1L & cs_hr==1L & cs_rr==1L & cs_bp==1L & cs_ox==1L, 1L, 0L),
+      
+      # Override: if explicit hospital flag indicates instability
+      stable  = ifelse(!is.na(clin_stab_hosp) & clin_stab_hosp == 0, 0L, stable)
+    )
+}
+
+df_tcs_halm <- make_stability_flags(df_tcs, temp_cutoff = 37.2)
+
+
+# ---- 5) Pick the best record per patient ----
+# Select the most appropriate record for each patient and calculate TCS (days)
+pick_one_row <- function(df, out_name = "ttcs_halm_372") {
+  df %>%
+    arrange(record_id, desc(stable), is.na(clin_stab_hosp), clin_stab_hosp) %>%
+    distinct(record_id, .keep_all = TRUE) %>%
+    transmute(
+      record_id,
+      !!out_name := case_when(
+        # Rule 1: Deceased patients (TCS = 29, one above the max)
+        clin_stab_hosp == 0 & stable == 0 & day28_pat_status_num == 5 ~ 29,
+        # Rule 2: Never reached stability before discharge (TCS = length of stay, capped at 28)
+        clin_stab_hosp == 0 & stable == 0 ~ pmin(as.numeric(los), 28),
+        # Rule 3: Reached stability (TCS = days to stability, capped at 28)
+        TRUE ~ pmin(as.numeric(clin_stab_hosp), 28)
+      )
+    )
+}
+
+df_stable_halm <- pick_one_row(df_tcs_halm, "ttcs_halm_372")
+
+
+# ---- 6) Final TCS table ----
+# Merge TCS results with admission/discharge data
+studydata_key <- studydata %>%
+  dplyr::mutate(EB_id = as.character(EB_id) |> trimws()) %>%
+  dplyr::select(EB_id, admission_dt1, discharge_date_local, day28_pat_status)
+
+ttcs <- df_stable_halm %>%
+  dplyr::rename(EB_id = record_id) %>%
+  dplyr::left_join(studydata_key, by = "EB_id") %>%
+  dplyr::mutate(
+    ttcs_halm_372_days  = ttcs_halm_372,
+    ttcs_halm_372_hours = round(ttcs_halm_372 * 24, 2)
+  ) %>%
+  relocate(
+    EB_id,
+    ttcs_halm_372,
+    ttcs_halm_372_days,
+    ttcs_halm_372_hours
+  )
+
+# ---- 7) Export results ----
+# Write the final table to CSV
+write.csv(ttcs, "Original_data/ttcs_halm_372_results.csv", row.names = FALSE)
+
+missing_ids <- setdiff(studydata$EB_id, ttcs$EB_id)
+length(missing_ids)
+missing_ids 
+
+#1233 1234 1235 1236 1237 1238 1240 1242 1243 1248 3124 3179 3313 3314 3315 3317 3319 3323 3325
+#3326 3329 3332 3333 3334 3335 3336 3337 3338 3340 3341 3342 3343 3344 3346 3347 3350 3351 3352
+#3353 
+#the total number is 39
+
+
+#merge studydata and ttcs
+studydata$ttcs_halm_372_days <- ttcs$ttcs_halm_372_days[match(studydata$EB_id, ttcs$EB_id)]
+#set 
+studydata$ttcs_halm_372_days[is.na(studydata$ttcs_halm_372_days) & studydata$day28_pat_status == "Deceased"] <- 29
+
+
+write.csv(studydata, "Original_data/studydata_matched_allpatients_tcs.csv", row.names = FALSE)
